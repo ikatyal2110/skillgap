@@ -64,7 +64,7 @@ function loadApiKey() {
 // existing subscription instead of a raw API key.
 // ---------------------------------------------------------------------------
 
-function buildPrompt(config, resume, skills, targets) {
+function buildPrompt(config, resume, skills, targets, prevSkills) {
   const system =
     "You are a career-analysis engine for a skill-gap tracker. You compare one " +
     "person's resume and self-declared skills against multiple target job " +
@@ -93,11 +93,22 @@ function buildPrompt(config, resume, skills, targets) {
     .map((t) => `### Target: ${t.name}\n${t.text}`)
     .join("\n\n");
 
-  const user =
+  let user =
     `GOAL: ${config.goal || "(none stated)"}\n\n` +
     `## Resume\n${resume || "(none provided)"}\n\n` +
     `## Self-declared skills\n${skills || "(none provided)"}\n\n` +
     `## Target roles and people\n${targetBlocks || "(none provided)"}`;
+
+  // Pin skill names to the previous run's so the delta stays an exact-match
+  // diff — otherwise "Vector databases" one run and "Vector DBs" the next
+  // reads as one gap closed plus one new gap.
+  if (prevSkills && prevSkills.length) {
+    user +=
+      "\n\n## Skill names from the previous analysis\n" +
+      "Reuse these EXACT names when referring to the same skills, so runs stay " +
+      "comparable. Only introduce a new name for a genuinely new skill:\n" +
+      prevSkills.map((s) => `- ${s}`).join("\n");
+  }
 
   return { system, user };
 }
@@ -135,6 +146,46 @@ function extractJson(text) {
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) t = fence[1].trim();
   return JSON.parse(t);
+}
+
+// Validate the parsed analysis before rendering. Returns a list of problems
+// (empty = valid); on failure the caller retries once with the problems
+// appended to the prompt so the model can correct itself.
+const ENUMS = {
+  your_level: ["have", "partial", "none"],
+  severity: ["low", "medium", "high"],
+  status: ["have", "partial", "missing"],
+};
+
+function validateAnalysis(a) {
+  if (!a || typeof a !== "object" || Array.isArray(a)) return ["response is not a JSON object"];
+  const errs = [];
+  for (const key of ["recurring_skills", "gap_matrix", "top_gaps", "projects"]) {
+    if (!Array.isArray(a[key])) errs.push(`"${key}" must be an array`);
+  }
+  if (errs.length) return errs;
+  a.recurring_skills.forEach((r, i) => {
+    if (typeof r.skill !== "string" || !r.skill) errs.push(`recurring_skills[${i}].skill must be a non-empty string`);
+    if (!Array.isArray(r.targets)) errs.push(`recurring_skills[${i}].targets must be an array`);
+  });
+  a.gap_matrix.forEach((g, i) => {
+    if (typeof g.skill !== "string" || !g.skill) errs.push(`gap_matrix[${i}].skill must be a non-empty string`);
+    for (const f of ["your_level", "severity", "status"]) {
+      if (!ENUMS[f].includes(g[f]))
+        errs.push(`gap_matrix[${i}].${f} must be one of ${ENUMS[f].join("|")}, got ${JSON.stringify(g[f])}`);
+    }
+  });
+  a.top_gaps.forEach((t, i) => {
+    if (typeof t.skill !== "string" || !t.skill) errs.push(`top_gaps[${i}].skill must be a non-empty string`);
+    if (!ENUMS.severity.includes(t.severity))
+      errs.push(`top_gaps[${i}].severity must be one of ${ENUMS.severity.join("|")}, got ${JSON.stringify(t.severity)}`);
+  });
+  a.projects.forEach((p, i) => {
+    for (const f of ["gap", "title", "description"]) {
+      if (typeof p[f] !== "string" || !p[f]) errs.push(`projects[${i}].${f} must be a non-empty string`);
+    }
+  });
+  return errs;
 }
 
 // Named CLI runners: each pipes the full prompt via stdin (never argv) so
@@ -313,53 +364,35 @@ function renderReport(analysis, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Delta: parse the gap table out of a previous report and diff open gaps
+// Delta: diff open gaps against the previous run's stored analysis JSON.
+// Each run writes reports/YYYY-MM-DD.json next to the .md, so the diff works
+// on data, not on re-parsed markdown. Name matching is exact after
+// case/whitespace normalization — the prompt pins skill names to the previous
+// run's, which is what keeps exact matching sufficient.
 // ---------------------------------------------------------------------------
 
-// Returns a Map<skill, status> parsed from the "## Gap matrix" table.
-function parseGapTable(markdown) {
-  const map = new Map();
-  if (!markdown) return map;
-  const lines = markdown.split("\n");
-  let inTable = false;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^##\s+Gap matrix\s*$/.test(line)) {
-      inTable = true;
-      continue;
-    }
-    if (!inTable) continue;
-    if (/^##\s+/.test(line)) break; // next section
-    if (!line.trim().startsWith("|")) continue;
-    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
-    if (cells.length < 5) continue;
-    if (cells[0] === "Skill" || /^-+$/.test(cells[0])) continue; // header / separator
-    const skill = cells[0].replace(/\\\|/g, "|");
-    const status = cells[4].toLowerCase();
-    if (skill) map.set(skill, status);
+const normSkill = (s) => String(s).toLowerCase().replace(/\s+/g, " ").trim();
+
+// Map<normalized skill, display name> of gaps not fully covered.
+function openGaps(analysis) {
+  const m = new Map();
+  for (const g of (analysis && analysis.gap_matrix) || []) {
+    if (g.status !== "have") m.set(normSkill(g.skill), g.skill);
   }
-  return map;
+  return m;
 }
 
-function openGaps(gapMap) {
-  const s = new Set();
-  for (const [skill, status] of gapMap) if (status !== "have") s.add(skill);
-  return s;
-}
-
-function computeDelta(analysis, prevMarkdown, prevName) {
-  if (!prevMarkdown) return { previous: null, closed: [], newGaps: [] };
-  const prevOpen = openGaps(parseGapTable(prevMarkdown));
-  const curOpen = openGaps(
-    parseGapTable(renderReport(analysis, { goal: "", date: "x", delta: null }))
-  );
-  const closed = [...prevOpen].filter((s) => !curOpen.has(s));
-  const newGaps = [...curOpen].filter((s) => !prevOpen.has(s));
+function computeDelta(analysis, prevAnalysis, prevName) {
+  if (!prevAnalysis) return { previous: null, closed: [], newGaps: [] };
+  const prev = openGaps(prevAnalysis);
+  const cur = openGaps(analysis);
+  const closed = [...prev].filter(([k]) => !cur.has(k)).map(([, name]) => name);
+  const newGaps = [...cur].filter(([k]) => !prev.has(k)).map(([, name]) => name);
   return { previous: prevName, closed, newGaps };
 }
 
-// Newest previous report in reports/ (excludes today's if already written).
-function findPreviousReport(reportsDir, todayName) {
+// Newest previous analysis JSON in reports/ (excludes today's if already written).
+function findPreviousAnalysis(reportsDir, todayJson) {
   let files;
   try {
     files = fs.readdirSync(reportsDir);
@@ -367,11 +400,15 @@ function findPreviousReport(reportsDir, todayName) {
     return null;
   }
   const dated = files
-    .filter((f) => /^\d{4}-\d{2}-\d{2}\.md$/.test(f) && f !== todayName)
+    .filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f) && f !== todayJson)
     .sort();
   if (!dated.length) return null;
   const name = dated[dated.length - 1];
-  return { name, text: fs.readFileSync(path.join(reportsDir, name), "utf8") };
+  try {
+    return { name, analysis: JSON.parse(fs.readFileSync(path.join(reportsDir, name), "utf8")) };
+  } catch {
+    return null; // unreadable previous JSON — treat this run as the baseline
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -411,39 +448,69 @@ async function main() {
     process.exit(1);
   }
 
-  const { system, user } = buildPrompt(config, resume, skills, targets);
+  const date = new Date().toISOString().slice(0, 10);
+  const reportsDir = path.join(ROOT, "reports");
+  const prev = findPreviousAnalysis(reportsDir, `${date}.json`);
+  const prevSkills = prev
+    ? [
+        ...new Set(
+          [...(prev.analysis.recurring_skills || []), ...(prev.analysis.gap_matrix || [])]
+            .map((x) => x.skill)
+            .filter(Boolean)
+        ),
+      ]
+    : null;
+
+  const { system, user } = buildPrompt(config, resume, skills, targets, prevSkills);
 
   console.log(`Analyzing ${targets.length} target(s) with ${model} via runner '${runner}'...`);
+
+  // Parse + validate; on any failure retry once with the problems appended
+  // so the model can correct itself instead of blindly re-rolling.
+  const attempt = (raw) => {
+    let parsed;
+    try {
+      parsed = extractJson(raw);
+    } catch (e) {
+      return { errors: [`response was not valid JSON: ${e.message}`] };
+    }
+    const errors = validateAnalysis(parsed);
+    return errors.length ? { errors } : { analysis: parsed };
+  };
+
   let analysis;
   try {
-    const raw = await getModelResponse(runner, apiKey, model, system, user);
-    try {
-      analysis = extractJson(raw);
-    } catch {
-      // Retry once on a malformed JSON response.
-      console.warn("First response was not valid JSON — retrying once...");
-      const retry = await getModelResponse(runner, apiKey, model, system, user);
-      analysis = extractJson(retry);
+    let res = attempt(await getModelResponse(runner, apiKey, model, system, user));
+    if (res.errors) {
+      console.warn(`Response failed validation — retrying once. (${res.errors[0]})`);
+      const fixup =
+        user +
+        "\n\nYour previous response was invalid:\n" +
+        res.errors.map((e) => `- ${e}`).join("\n") +
+        "\nRespond again with ONLY the corrected JSON object.";
+      res = attempt(await getModelResponse(runner, apiKey, model, system, fixup));
+      if (res.errors) {
+        throw new Error(
+          "model response failed validation after retry:\n" +
+            res.errors.map((e) => `  - ${e}`).join("\n")
+        );
+      }
     }
+    analysis = res.analysis;
   } catch (err) {
     console.error(`Analysis failed: ${err.message}`);
     process.exit(1);
   }
 
-  const date = new Date().toISOString().slice(0, 10);
-  const reportsDir = path.join(ROOT, "reports");
   fs.mkdirSync(reportsDir, { recursive: true });
-
-  const todayName = `${date}.md`;
-  const prev = findPreviousReport(reportsDir, todayName);
-  const delta = computeDelta(analysis, prev && prev.text, prev && prev.name);
-
+  const delta = computeDelta(analysis, prev && prev.analysis, prev && prev.name);
   const report = renderReport(analysis, { goal: config.goal, date, delta });
 
-  fs.writeFileSync(path.join(reportsDir, todayName), report);
+  fs.writeFileSync(path.join(reportsDir, `${date}.md`), report);
+  fs.writeFileSync(path.join(reportsDir, `${date}.json`), JSON.stringify(analysis, null, 2) + "\n");
   fs.writeFileSync(path.join(ROOT, "GAP.md"), report);
 
-  console.log(`Wrote reports/${todayName} and GAP.md`);
+  console.log(`Wrote reports/${date}.md, reports/${date}.json and GAP.md`);
   if (delta.previous) {
     console.log(`Delta vs ${delta.previous}: ${delta.closed.length} closed, ${delta.newGaps.length} new.`);
   }
@@ -458,7 +525,8 @@ if (require.main === module) {
 
 module.exports = {
   renderReport,
-  parseGapTable,
+  buildPrompt,
+  validateAnalysis,
   computeDelta,
   extractJson,
   resolveRunner,

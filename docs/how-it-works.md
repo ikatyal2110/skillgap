@@ -41,6 +41,21 @@ The model is asked to return JSON with three parts:
 - **projects** — for the top 5 gaps, one scoped project each (weekend-to-two-weeks), described
   in terms of the skills you already have plus the one you're closing.
 
+The response is schema-validated before anything renders: required fields must exist and
+enum fields (`your_level`, `severity`, `status`) must be in range. An invalid response is
+retried once with the exact validation errors appended to the prompt, so the model corrects
+itself rather than re-rolling blind.
+
+## How the delta stays honest across runs
+
+Each run writes the raw analysis JSON to `reports/YYYY-MM-DD.json` next to the markdown
+report, and the delta is computed by diffing the current JSON against the previous one —
+no re-parsing of rendered markdown. To stop the model renaming skills between runs
+("Vector databases" one month, "Vector DBs" the next, which would falsely read as one gap
+closed and one opened), the prompt includes the previous run's skill names with an
+instruction to reuse them exactly. Matching is then a plain set diff after case and
+whitespace normalization.
+
 ## Why rendering is deterministic
 
 The model returns data, not markdown. `skillgap.js` renders that JSON into `GAP.md` and
