@@ -3,6 +3,10 @@
 # What you're aiming for — this frames the whole analysis.
 goal: Break into an AI engineer role at a top lab within 12 months.
 
+# Optional: your GitHub username. skillgap fetches your public repos and adds
+# them to the analysis as skill evidence alongside your resume.
+# github: your-username
+
 # Anthropic model used for the analysis. claude-sonnet-5 is a good default;
 # swap for claude-opus-4-8 if you want the most thorough analysis.
 # Only used when runner is "api" — the CLI runners below use whatever model

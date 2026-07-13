@@ -25,9 +25,16 @@ containing:
 - every file under `targets/roles/` — job descriptions
 - every file under `targets/people/` — profiles of people already in the role
 - the goal statement from `skillgap.yml`
+- if `github: your-username` is set in `skillgap.yml`, a digest of your public repos
+  (name, description, language, topics, stars, last pushed month), forks excluded, capped
+  at 50, fetched from the GitHub API and treated as skill evidence alongside the resume
 
 That's it. No chunking, no embeddings, no retrieval — the whole context fits in one call, so
 it's sent as one call.
+
+The GitHub fetch degrades gracefully: no `github` key means the feature is entirely absent
+from the prompt, and a failed fetch (rate limit, GitHub outage, bad username) prints one
+warning and continues the analysis without the digest. A GitHub problem never fails a run.
 
 ## What comes back
 

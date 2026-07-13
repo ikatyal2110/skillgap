@@ -16,6 +16,7 @@ const {
   extractJson,
   resolveRunner,
   runCustomRunner,
+  renderGithubDigest,
 } = require("./skillgap.js");
 
 const analysis = JSON.parse(
@@ -105,6 +106,91 @@ assert(pinned.user.includes("Reuse these EXACT names"), "prompt should pin previ
 assert(pinned.user.includes("- Vector databases"), "prompt should list previous skill names");
 const unpinned = buildPrompt({ goal: "g" }, "resume", "skills", [{ name: "roles/x", text: "jd" }], null);
 assert(!unpinned.user.includes("Reuse these EXACT names"), "no pinning block without previous run");
+
+// --- renderGithubDigest: pure, offline, fixture repos --------------------
+const repoFixture = [
+  {
+    name: "rag-notes",
+    description: "RAG service over my markdown notes",
+    language: "Python",
+    topics: ["rag", "embeddings"],
+    stargazers_count: 12,
+    pushed_at: "2026-06-15T10:00:00Z",
+    fork: false,
+  },
+  {
+    name: "forked-repo",
+    description: "Should be skipped",
+    language: "JavaScript",
+    topics: [],
+    stargazers_count: 999,
+    pushed_at: "2026-07-01T10:00:00Z",
+    fork: true,
+  },
+  {
+    name: "bare-repo",
+    description: null,
+    language: null,
+    topics: [],
+    stargazers_count: 0,
+    pushed_at: "2025-01-02T10:00:00Z",
+    fork: false,
+  },
+];
+
+const digest = renderGithubDigest(repoFixture);
+assert(digest.includes("rag-notes"), "non-fork repo should render");
+assert(!digest.includes("forked-repo"), "forked repo should be skipped");
+assert(digest.includes("RAG service over my markdown notes"), "description should render");
+assert(digest.includes("Python"), "language should render");
+assert(digest.includes("rag, embeddings"), "topics should render");
+assert(digest.includes("12 stars"), "stars should render");
+assert(digest.includes("2026-06"), "last pushed year-month should render");
+assert(digest.includes("bare-repo"), "repo with nulls should still render");
+assert(digest.includes("(no description)"), "missing description should get a placeholder");
+
+assert.strictEqual(renderGithubDigest([]), "", "empty repo list should render empty string");
+assert.strictEqual(renderGithubDigest(undefined), "", "undefined repo list should render empty string");
+
+const manyRepos = Array.from({ length: 60 }, (_, i) => ({
+  name: `repo-${i}`,
+  description: "d",
+  language: "Go",
+  topics: [],
+  stargazers_count: 0,
+  pushed_at: "2026-01-01T00:00:00Z",
+  fork: false,
+}));
+const cappedDigest = renderGithubDigest(manyRepos);
+assert.strictEqual(cappedDigest.split("\n").length, 50, "digest should cap at 50 repos");
+assert(cappedDigest.includes("repo-49"), "cap should keep the first 50 repos in input order");
+assert(!cappedDigest.includes("repo-50"), "cap should drop repos beyond 50");
+
+// --- buildPrompt: GitHub evidence section is opt-in -----------------------
+const withGithub = buildPrompt(
+  { goal: "g" },
+  "resume",
+  "skills",
+  [{ name: "roles/x", text: "jd" }],
+  null,
+  "rag-notes — a project | Python | rag | 12 stars | pushed 2026-06"
+);
+assert(
+  withGithub.user.includes("## GitHub public repos (evidence)"),
+  "prompt should include the GitHub evidence section when a digest is passed"
+);
+assert(withGithub.user.includes("rag-notes"), "prompt should include the digest content");
+
+const withoutGithub = buildPrompt({ goal: "g" }, "resume", "skills", [{ name: "roles/x", text: "jd" }], null, null);
+assert(
+  !withoutGithub.user.includes("## GitHub public repos (evidence)"),
+  "prompt should omit the GitHub evidence section when no digest is passed"
+);
+const withEmptyGithub = buildPrompt({ goal: "g" }, "resume", "skills", [{ name: "roles/x", text: "jd" }], null, "");
+assert(
+  !withEmptyGithub.user.includes("## GitHub public repos (evidence)"),
+  "prompt should omit the GitHub evidence section for an empty digest"
+);
 
 // --- resolveRunner precedence: flag > env > yml > default "api" ----------
 assert.strictEqual(

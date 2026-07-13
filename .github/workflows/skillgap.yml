@@ -40,6 +40,7 @@ jobs:
         if: steps.check.outputs.has_key == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: node skillgap.js
 
       - name: Commit report

@@ -64,7 +64,7 @@ function loadApiKey() {
 // existing subscription instead of a raw API key.
 // ---------------------------------------------------------------------------
 
-function buildPrompt(config, resume, skills, targets, prevSkills) {
+function buildPrompt(config, resume, skills, targets, prevSkills, githubDigest) {
   const system =
     "You are a career-analysis engine for a skill-gap tracker. You compare one " +
     "person's resume and self-declared skills against multiple target job " +
@@ -110,7 +110,46 @@ function buildPrompt(config, resume, skills, targets, prevSkills) {
       prevSkills.map((s) => `- ${s}`).join("\n");
   }
 
+  if (githubDigest) {
+    user +=
+      "\n\n## GitHub public repos (evidence)\n" +
+      "These are the person's own projects, fetched from their public GitHub repos. " +
+      "Count them as skill evidence alongside the resume, weighted by recency (recent " +
+      "pushes matter more) and substance (a developed project outweighs a stub):\n" +
+      githubDigest;
+  }
+
   return { system, user };
+}
+
+// GitHub evidence: one unauthenticated (or token-boosted) fetch of a user's
+// public repos, reduced to a compact text digest for the prompt. Fetch and
+// render are separate so the render side stays testable without network.
+async function fetchGithubRepos(username) {
+  const headers = { "user-agent": "skillgap" };
+  if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const res = await fetch(
+    `https://api.github.com/users/${encodeURIComponent(username)}/repos?sort=pushed&per_page=100`,
+    { headers }
+  );
+  if (!res.ok) throw new Error(`GitHub API error ${res.status}`);
+  return res.json();
+}
+
+// Pure + deterministic: skip forks, cap at 50, one line per repo.
+function renderGithubDigest(repos) {
+  return (repos || [])
+    .filter((r) => !r.fork)
+    .slice(0, 50)
+    .map((r) => {
+      const desc = r.description || "(no description)";
+      const lang = r.language || "?";
+      const topics = (r.topics || []).join(", ") || "-";
+      const stars = r.stargazers_count ?? 0;
+      const pushed = r.pushed_at ? String(r.pushed_at).slice(0, 7) : "?";
+      return `${r.name} — ${desc} | ${lang} | ${topics} | ${stars} stars | pushed ${pushed}`;
+    })
+    .join("\n");
 }
 
 async function callAnthropic(apiKey, model, system, user) {
@@ -461,7 +500,16 @@ async function main() {
       ]
     : null;
 
-  const { system, user } = buildPrompt(config, resume, skills, targets, prevSkills);
+  let githubDigest = null;
+  if (config.github) {
+    try {
+      githubDigest = renderGithubDigest(await fetchGithubRepos(config.github));
+    } catch (err) {
+      console.warn(`GitHub fetch failed, continuing without repo evidence: ${err.message}`);
+    }
+  }
+
+  const { system, user } = buildPrompt(config, resume, skills, targets, prevSkills, githubDigest);
 
   console.log(`Analyzing ${targets.length} target(s) with ${model} via runner '${runner}'...`);
 
@@ -531,4 +579,5 @@ module.exports = {
   extractJson,
   resolveRunner,
   runCustomRunner,
+  renderGithubDigest,
 };
