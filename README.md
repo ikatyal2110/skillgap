@@ -54,6 +54,11 @@ already have.
    - `me/skills.yml` — optional self-declared skills and levels
    - `targets/roles/<company>-<role>.md` — one job description per file
    - `targets/people/<name>.md` — optional profiles of people already in the role
+
+   Don't want to hunt postings by hand? Open your fork in Claude Code and run
+   `/find-roles ai engineer, remote, new grad` — it searches the web, pulls the full
+   posting text, and writes the files for you. Using another agent CLI? Point it at
+   `.claude/commands/find-roles.md`; the instructions work anywhere.
 3. Pick how the analysis runs:
    - **API key**: add `ANTHROPIC_API_KEY`, either in a `.env` file for local runs or as
      a repo secret for the GitHub Action.

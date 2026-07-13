@@ -18,6 +18,15 @@ directly. You can also point `runner` at any shell command containing `{promptfi
 different agent CLI entirely; skillgap writes the prompt to that file and reads the command's
 stdout as the response.
 
+### Do I have to find and paste job postings myself?
+
+Pasting works everywhere and is the reliable path, but you can hand the hunting to your
+agent CLI: open your fork in Claude Code and run `/find-roles <what you're looking for>`.
+The command (shipped in `.claude/commands/find-roles.md`) searches the web, pulls the full
+text of public postings, and writes them to `targets/roles/` in the right format. It skips
+login-walled listings (LinkedIn and most Workday portals) — those you still paste by hand.
+Any other agent CLI can follow the same instructions; the file is plain markdown.
+
 ### What does a run cost?
 
 One API call per run: your resume, `me/skills.yml`, and every file under `targets/` go into
