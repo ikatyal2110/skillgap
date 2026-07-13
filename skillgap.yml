@@ -5,4 +5,17 @@ goal: Break into an AI engineer role at a top lab within 12 months.
 
 # Anthropic model used for the analysis. claude-sonnet-5 is a good default;
 # swap for claude-opus-4-8 if you want the most thorough analysis.
+# Only used when runner is "api" — the CLI runners below use whatever model
+# your logged-in subscription is configured for.
 model: claude-sonnet-5
+
+# How to run the analysis. Precedence: --runner flag > SKILLGAP_RUNNER env
+# var > this setting > "api".
+#   api    - Anthropic Messages API, needs ANTHROPIC_API_KEY (default)
+#   claude - Claude Code CLI headless (`claude -p`), uses your Claude subscription, no key
+#   codex  - OpenAI Codex CLI (`codex exec`), uses your Codex subscription, no key
+#   gemini - Gemini CLI (`gemini -p`), uses your Gemini subscription, no key
+#   or any shell command string containing "{promptfile}" — skillgap writes
+#   the prompt to that file and runs your command, e.g.:
+#   runner: "my-agent-cli --file {promptfile}"
+runner: api

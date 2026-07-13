@@ -8,6 +8,16 @@ added under `targets/`. There's no hosted backend, no analytics, no third-party 
 between. If you don't want your resume and target roles visible on GitHub, make your fork
 private — the repo's contents are the only thing anyone else could see.
 
+### Do I need an API key?
+
+No — if you already pay for Claude Code, OpenAI Codex CLI, or Gemini CLI, set `runner: claude`,
+`codex`, or `gemini` in `skillgap.yml` (or `--runner claude`, or `SKILLGAP_RUNNER=claude`) and
+skillgap runs the analysis through that CLI's logged-in session instead of a raw API call —
+zero `ANTHROPIC_API_KEY` needed. `runner: api` (the default) still uses the Anthropic API
+directly. You can also point `runner` at any shell command containing `{promptfile}` to use a
+different agent CLI entirely; skillgap writes the prompt to that file and reads the command's
+stdout as the response.
+
 ### What does a run cost?
 
 One API call per run: your resume, `me/skills.yml`, and every file under `targets/` go into

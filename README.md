@@ -52,8 +52,12 @@ already have.
    - `me/skills.yml` — optional self-declared skills and levels
    - `targets/roles/<company>-<role>.md` — one job description per file
    - `targets/people/<name>.md` — optional profiles of people already in the role
-3. Add your `ANTHROPIC_API_KEY` — as a `.env` file for local runs, or as a repo secret
-   for the GitHub Action.
+3. Add an API key OR use a subscription you already pay for:
+   - **API key**: add `ANTHROPIC_API_KEY` — as a `.env` file for local runs, or as a repo
+     secret for the GitHub Action.
+   - **No API key**: if you're logged into Claude Code, Codex CLI, or Gemini CLI, set
+     `runner: claude` / `codex` / `gemini` in `skillgap.yml` (or pass `--runner claude` /
+     `SKILLGAP_RUNNER=claude`) and skillgap runs through that CLI instead.
 4. Run `npm install && node skillgap.js` locally (Node 20+), or trigger the **skillgap**
    Action from the Actions tab.
 5. Read `GAP.md` at the repo root.

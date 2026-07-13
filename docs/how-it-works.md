@@ -3,9 +3,22 @@
 skillgap does exactly one thing with the model: turn your resume and your target files into
 structured JSON. Everything after that — tables, rankings, diffs — is plain JavaScript.
 
+## Runners
+
+`skillgap.js` doesn't hardcode the Anthropic API — it has a `runner` setting (`skillgap.yml`,
+`--runner` flag, or `SKILLGAP_RUNNER` env var; flag > env > yml > default). `api` (default)
+calls the Anthropic Messages API directly with `ANTHROPIC_API_KEY`. `claude`, `codex`, and
+`gemini` instead pipe the exact same prompt via stdin to the Claude Code, Codex, or Gemini
+CLI and read its stdout back — no API key, just your existing CLI login. A custom command
+string containing `{promptfile}` works too: skillgap writes the prompt to a temp file,
+substitutes the path, and runs the command. Every runner's raw output goes through the same
+fence-stripping + `JSON.parse` + one-retry logic below, so the rest of the pipeline doesn't
+care which one produced the text.
+
 ## What gets sent
 
-One request to the Anthropic Messages API, containing:
+One request to the Anthropic Messages API (or an equivalent one to your chosen agent CLI),
+containing:
 
 - `me/resume.md` — your resume text
 - `me/skills.yml` — your self-declared skills and levels, if you filled it in

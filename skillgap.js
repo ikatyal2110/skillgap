@@ -6,7 +6,9 @@
 // rendering in JS. See PLAN.md for the contract.
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 const YAML = require("yaml");
 
 const ROOT = __dirname;
@@ -57,7 +59,9 @@ function loadApiKey() {
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic call
+// Model call — Anthropic API by default, or a locally-installed agent CLI
+// (Claude Code / Codex / Gemini / any custom command) using the user's
+// existing subscription instead of a raw API key.
 // ---------------------------------------------------------------------------
 
 function buildPrompt(config, resume, skills, targets) {
@@ -65,7 +69,8 @@ function buildPrompt(config, resume, skills, targets) {
     "You are a career-analysis engine for a skill-gap tracker. You compare one " +
     "person's resume and self-declared skills against multiple target job " +
     "descriptions and profiles of people already in those roles. Respond with a " +
-    "SINGLE JSON object and nothing else — no prose, no markdown fences.\n\n" +
+    "SINGLE JSON object and nothing else. Output ONLY the JSON object — no prose before " +
+    "or after it, no markdown fences, no commentary.\n\n" +
     "The JSON must have exactly these top-level keys:\n" +
     '- "recurring_skills": array of { "skill": string, "frequency": integer (how many ' +
     'target files mention it), "targets": array of target names that mention it }, ' +
@@ -130,6 +135,98 @@ function extractJson(text) {
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) t = fence[1].trim();
   return JSON.parse(t);
+}
+
+// Named CLI runners: each pipes the full prompt via stdin (never argv) so
+// resume/target text can never be interpreted as shell arguments.
+const RUNNER_INFO = {
+  claude: {
+    bin: "claude",
+    args: ["-p", "--output-format", "text"],
+    install: "the Claude Code CLI installed and logged in — https://claude.com/claude-code",
+  },
+  codex: {
+    bin: "codex",
+    args: ["exec"],
+    install: "the OpenAI Codex CLI installed and logged in — https://github.com/openai/codex",
+  },
+  gemini: {
+    bin: "gemini",
+    args: ["-p"],
+    install: "the Gemini CLI installed and logged in — https://github.com/google-gemini/gemini-cli",
+  },
+};
+
+function runCliRunner(name, prompt) {
+  const info = RUNNER_INFO[name];
+  const res = spawnSync(info.bin, info.args, {
+    input: prompt,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  if (res.error) {
+    if (res.error.code === "ENOENT") {
+      throw new Error(`runner '${name}' needs ${info.install}`);
+    }
+    throw res.error;
+  }
+  if (res.status !== 0) {
+    throw new Error(`runner '${name}' exited with code ${res.status}: ${(res.stderr || "").slice(0, 800)}`);
+  }
+  return res.stdout;
+}
+
+// Custom shell command runner. If the command contains "{promptfile}" the
+// prompt is written to a temp file and the placeholder is replaced with its
+// path; otherwise the prompt is piped via stdin. Never interpolated into the
+// command string directly — avoids quoting/injection bugs with resume text.
+function runCustomRunner(command, prompt) {
+  const hasPromptfile = command.includes("{promptfile}");
+  let promptfile = null;
+  try {
+    let cmd = command;
+    let input;
+    if (hasPromptfile) {
+      promptfile = path.join(os.tmpdir(), `skillgap-prompt-${process.pid}-${Date.now()}.txt`);
+      fs.writeFileSync(promptfile, prompt, "utf8");
+      cmd = command.split("{promptfile}").join(promptfile);
+    } else {
+      input = prompt;
+    }
+    const res = spawnSync(cmd, {
+      shell: true,
+      input,
+      encoding: "utf8",
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    if (res.error) throw res.error;
+    if (res.status !== 0) {
+      throw new Error(`custom runner exited with code ${res.status}: ${(res.stderr || "").slice(0, 800)}`);
+    }
+    return res.stdout;
+  } finally {
+    if (promptfile) {
+      try {
+        fs.unlinkSync(promptfile);
+      } catch {}
+    }
+  }
+}
+
+// flag > env > yml > default. Kept tiny on purpose.
+function resolveRunner(argv, env, config) {
+  const i = argv.indexOf("--runner");
+  if (i !== -1 && argv[i + 1]) return argv[i + 1];
+  if (env.SKILLGAP_RUNNER) return env.SKILLGAP_RUNNER;
+  if (config.runner) return config.runner;
+  return "api";
+}
+
+async function getModelResponse(runner, apiKey, model, system, user) {
+  if (runner === "api") return callAnthropic(apiKey, model, system, user);
+  const prompt = `${system}\n\n${user}`;
+  if (RUNNER_INFO[runner]) return runCliRunner(runner, prompt);
+  return runCustomRunner(runner, prompt);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,16 +381,22 @@ function findPreviousReport(reportsDir, todayName) {
 async function main() {
   const config = YAML.parse(readIfExists(path.join(ROOT, "skillgap.yml")) || "") || {};
   const model = config.model || "claude-sonnet-5";
+  const runner = resolveRunner(process.argv.slice(2), process.env, config);
 
-  const apiKey = loadApiKey();
-  if (!apiKey) {
-    console.error(
-      "Missing ANTHROPIC_API_KEY.\n" +
-        "  - Locally: create a .env file with `ANTHROPIC_API_KEY=sk-ant-...`\n" +
-        "  - In GitHub Actions: add ANTHROPIC_API_KEY as a repository secret.\n" +
-        "Never commit your key — .env is gitignored."
-    );
-    process.exit(1);
+  let apiKey = null;
+  if (runner === "api") {
+    apiKey = loadApiKey();
+    if (!apiKey) {
+      console.error(
+        "Missing ANTHROPIC_API_KEY.\n" +
+          "  - Locally: create a .env file with `ANTHROPIC_API_KEY=sk-ant-...`\n" +
+          "  - In GitHub Actions: add ANTHROPIC_API_KEY as a repository secret.\n" +
+          "  - Or set `runner: claude` / `codex` / `gemini` in skillgap.yml to use an " +
+          "existing agent-CLI subscription instead — no API key needed.\n" +
+          "Never commit your key — .env is gitignored."
+      );
+      process.exit(1);
+    }
   }
 
   const resume = readIfExists(path.join(ROOT, "me", "resume.md"));
@@ -310,16 +413,16 @@ async function main() {
 
   const { system, user } = buildPrompt(config, resume, skills, targets);
 
-  console.log(`Analyzing ${targets.length} target(s) with ${model}...`);
+  console.log(`Analyzing ${targets.length} target(s) with ${model} via runner '${runner}'...`);
   let analysis;
   try {
-    const raw = await callAnthropic(apiKey, model, system, user);
+    const raw = await getModelResponse(runner, apiKey, model, system, user);
     try {
       analysis = extractJson(raw);
     } catch {
       // Retry once on a malformed JSON response.
       console.warn("First response was not valid JSON — retrying once...");
-      const retry = await callAnthropic(apiKey, model, system, user);
+      const retry = await getModelResponse(runner, apiKey, model, system, user);
       analysis = extractJson(retry);
     }
   } catch (err) {
@@ -353,4 +456,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { renderReport, parseGapTable, computeDelta, extractJson };
+module.exports = {
+  renderReport,
+  parseGapTable,
+  computeDelta,
+  extractJson,
+  resolveRunner,
+  runCustomRunner,
+};
