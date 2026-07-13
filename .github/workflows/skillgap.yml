@@ -1,0 +1,56 @@
+name: skillgap
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "me/**"
+      - "targets/**"
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check for API key
+        id: check
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY secret is not set — skipping analysis. Add it in Settings > Secrets and variables > Actions."
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.check.outputs.has_key == 'true'
+        run: npm install --no-audit --no-fund
+
+      - name: Run skillgap
+        if: steps.check.outputs.has_key == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node skillgap.js
+
+      - name: Commit report
+        if: steps.check.outputs.has_key == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add GAP.md reports/
+          if git diff --staged --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "skillgap: update GAP.md and dated report"
+            git push
+          fi

@@ -1,0 +1,23 @@
+# <!-- REPLACE ME with your own -->
+# Optional self-declared skills and how comfortable you are with each.
+# level: comfortable | working | basic
+
+skills:
+  - name: Python
+    level: comfortable
+  - name: JavaScript
+    level: comfortable
+  - name: TypeScript
+    level: working
+  - name: React
+    level: working
+  - name: Flask
+    level: comfortable
+  - name: Docker
+    level: working
+  - name: scikit-learn
+    level: working
+  - name: PyTorch
+    level: basic
+  - name: SQL
+    level: working

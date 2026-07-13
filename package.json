@@ -1,0 +1,16 @@
+{
+  "name": "skillgap",
+  "version": "1.0.0",
+  "description": "A living skill-gap tracker: compare your resume against the roles you want and get ranked gaps plus a project to close each one.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node skillgap.js",
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "yaml": "^2.5.0"
+  }
+}

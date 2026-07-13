@@ -1,0 +1,41 @@
+{
+  "recurring_skills": [
+    { "skill": "PyTorch", "frequency": 3, "targets": ["roles/openai-ml-engineer", "roles/anthropic-ai-engineer", "people/jane-ai-engineer"] },
+    { "skill": "Python", "frequency": 3, "targets": ["roles/openai-ml-engineer", "roles/anthropic-ai-engineer", "people/jane-ai-engineer"] },
+    { "skill": "LLM fine-tuning", "frequency": 2, "targets": ["roles/anthropic-ai-engineer", "people/jane-ai-engineer"] },
+    { "skill": "Distributed training", "frequency": 2, "targets": ["roles/openai-ml-engineer", "roles/anthropic-ai-engineer"] },
+    { "skill": "Docker", "frequency": 1, "targets": ["roles/openai-ml-engineer"] }
+  ],
+  "gap_matrix": [
+    { "skill": "Python", "required_by_count": 3, "your_level": "have", "severity": "low", "status": "have" },
+    { "skill": "PyTorch", "required_by_count": 3, "your_level": "partial", "severity": "high", "status": "partial" },
+    { "skill": "LLM fine-tuning", "required_by_count": 2, "your_level": "none", "severity": "high", "status": "missing" },
+    { "skill": "Distributed training", "required_by_count": 2, "your_level": "none", "severity": "medium", "status": "missing" },
+    { "skill": "Docker", "required_by_count": 1, "your_level": "have", "severity": "low", "status": "have" }
+  ],
+  "top_gaps": [
+    { "skill": "LLM fine-tuning", "rank": 1, "frequency": 2, "severity": "high", "why": "Every target role expects hands-on experience adapting pretrained models." },
+    { "skill": "PyTorch", "rank": 2, "frequency": 3, "severity": "high", "why": "The most-mentioned framework across all targets and you only have basic exposure." },
+    { "skill": "Distributed training", "rank": 3, "frequency": 2, "severity": "medium", "why": "Scaling training across GPUs is table stakes for AI engineering roles." }
+  ],
+  "projects": [
+    {
+      "gap": "LLM fine-tuning",
+      "title": "Fine-tune a small LLM on your own dataset",
+      "description": "Take an open 1-3B parameter model and LoRA fine-tune it on a domain dataset you scrape yourself. Publish a before/after eval and a short write-up. This proves you can run the full fine-tuning loop end to end.",
+      "builds_on": ["Python", "PyTorch"]
+    },
+    {
+      "gap": "PyTorch",
+      "title": "Reimplement a paper's model in PyTorch from scratch",
+      "description": "Pick a small vision or NLP paper and reimplement its model and training loop in raw PyTorch, matching the reported metrics on a subset. Demonstrates real framework fluency beyond tutorials.",
+      "builds_on": ["Python"]
+    },
+    {
+      "gap": "Distributed training",
+      "title": "Multi-GPU training demo with DDP",
+      "description": "Adapt an existing training script to run under PyTorch DistributedDataParallel on a rented multi-GPU box and document the throughput scaling. Shows you can move past single-GPU work.",
+      "builds_on": ["Python", "PyTorch"]
+    }
+  ]
+}
