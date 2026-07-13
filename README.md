@@ -60,8 +60,8 @@ already have.
    - **No API key**: logged into Claude Code, Codex CLI, or Gemini CLI? Set
      `runner: claude` / `codex` / `gemini` in `skillgap.yml` (or pass `--runner claude`)
      and skillgap runs through that subscription instead.
-   - Optional: add `github: your-username` to `skillgap.yml` and your public repos count
-     as skill evidence alongside your resume.
+   - Optional: add `github: your-username` to `skillgap.yml` and your public repos, plus
+     your merged PRs to other people's repos, count as skill evidence alongside your resume.
 4. Run `npm install && node skillgap.js` locally (Node 20+), or trigger the **skillgap**
    Action from the Actions tab.
 5. Read `GAP.md` at the repo root.

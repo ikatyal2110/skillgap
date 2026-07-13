@@ -17,6 +17,7 @@ const {
   resolveRunner,
   runCustomRunner,
   renderGithubDigest,
+  renderPRDigest,
 } = require("./skillgap.js");
 
 const analysis = JSON.parse(
@@ -165,6 +166,30 @@ const cappedDigest = renderGithubDigest(manyRepos);
 assert.strictEqual(cappedDigest.split("\n").length, 50, "digest should cap at 50 repos");
 assert(cappedDigest.includes("repo-49"), "cap should keep the first 50 repos in input order");
 assert(!cappedDigest.includes("repo-50"), "cap should drop repos beyond 50");
+
+// --- renderPRDigest: groups by external repo, excludes own repos ----------
+const prFixture = [
+  { repository_url: "https://api.github.com/repos/jlowin/fastmcp", closed_at: "2026-06-10T00:00:00Z" },
+  { repository_url: "https://api.github.com/repos/jlowin/fastmcp", closed_at: "2026-07-02T00:00:00Z" },
+  { repository_url: "https://api.github.com/repos/simonw/llm", closed_at: "2026-05-20T00:00:00Z" },
+  { repository_url: "https://api.github.com/repos/ikatyal2110/skillgap", closed_at: "2026-07-13T00:00:00Z" },
+  { repository_url: "not-a-repo-url", closed_at: "2026-01-01T00:00:00Z" },
+];
+const prDigest = renderPRDigest(prFixture, "ikatyal2110");
+assert(prDigest.includes("jlowin/fastmcp: 2 merged PRs, most recent 2026-07"), "PRs should group by repo with latest month");
+assert(prDigest.includes("simonw/llm: 1 merged PR, most recent 2026-05"), "singular PR line should render");
+assert(!prDigest.includes("ikatyal2110"), "PRs to own repos should be excluded");
+assert.strictEqual(prDigest.split("\n")[0].startsWith("jlowin/fastmcp"), true, "repos should sort by PR count desc");
+assert.strictEqual(renderPRDigest([], "u"), "", "empty PR list should render empty string");
+assert.strictEqual(renderPRDigest(undefined, "u"), "", "undefined PR list should render empty string");
+
+// --- buildPrompt: merged-PR evidence section is opt-in --------------------
+const withPRs = buildPrompt({ goal: "g" }, "r", "s", [{ name: "roles/x", text: "jd" }], null, null,
+  "jlowin/fastmcp: 2 merged PRs, most recent 2026-07");
+assert(withPRs.user.includes("## Merged pull requests to external repos (evidence)"), "PR section should render when digest passed");
+assert(withPRs.user.includes("jlowin/fastmcp"), "PR digest content should render");
+const withoutPRs = buildPrompt({ goal: "g" }, "r", "s", [{ name: "roles/x", text: "jd" }], null, null, null);
+assert(!withoutPRs.user.includes("Merged pull requests"), "PR section should be absent without a digest");
 
 // --- buildPrompt: GitHub evidence section is opt-in -----------------------
 const withGithub = buildPrompt(

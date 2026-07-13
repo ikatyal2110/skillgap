@@ -28,6 +28,10 @@ containing:
 - if `github: your-username` is set in `skillgap.yml`, a digest of your public repos
   (name, description, language, topics, stars, last pushed month), forks excluded, capped
   at 50, fetched from the GitHub API and treated as skill evidence alongside the resume
+- with the same `github` setting, a second digest of your merged pull requests to repos
+  you don't own (`owner/repo: N merged PRs, most recent month`), capped at 30 repos. The
+  prompt weights these as strong evidence: an external maintainer reviewed and merged the
+  work, which also evidences collaboration and code-review fluency
 
 That's it. No chunking, no embeddings, no retrieval — the whole context fits in one call, so
 it's sent as one call.

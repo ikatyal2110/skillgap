@@ -64,7 +64,7 @@ function loadApiKey() {
 // existing subscription instead of a raw API key.
 // ---------------------------------------------------------------------------
 
-function buildPrompt(config, resume, skills, targets, prevSkills, githubDigest) {
+function buildPrompt(config, resume, skills, targets, prevSkills, githubDigest, prDigest) {
   const system =
     "You are a career-analysis engine for a skill-gap tracker. You compare one " +
     "person's resume and self-declared skills against multiple target job " +
@@ -119,6 +119,16 @@ function buildPrompt(config, resume, skills, targets, prevSkills, githubDigest) 
       githubDigest;
   }
 
+  if (prDigest) {
+    user +=
+      "\n\n## Merged pull requests to external repos (evidence)\n" +
+      "Pull requests this person wrote that maintainers of OTHER projects reviewed and " +
+      "merged. Treat these as strong evidence: the code passed external review, and " +
+      "sustained contributions to established projects also evidence collaboration and " +
+      "code-review fluency:\n" +
+      prDigest;
+  }
+
   return { system, user };
 }
 
@@ -134,6 +144,46 @@ async function fetchGithubRepos(username) {
   );
   if (!res.ok) throw new Error(`GitHub API error ${res.status}`);
   return res.json();
+}
+
+// Merged PRs across ALL repos (theirs or not), via the search API.
+async function fetchMergedPRs(username) {
+  const headers = { "user-agent": "skillgap" };
+  if (process.env.GITHUB_TOKEN) headers.authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const q = encodeURIComponent(`author:${username} type:pr is:merged`);
+  const res = await fetch(
+    `https://api.github.com/search/issues?q=${q}&sort=updated&per_page=100`,
+    { headers }
+  );
+  if (!res.ok) throw new Error(`GitHub search API error ${res.status}`);
+  const data = await res.json();
+  return data.items || [];
+}
+
+// Pure + deterministic: PRs merged into repos the person does NOT own,
+// grouped by repo with count and most-recent merge month. PRs to their own
+// repos are excluded — self-merged work is already covered by the repo digest.
+function renderPRDigest(items, username) {
+  const own = String(username || "").toLowerCase();
+  const byRepo = new Map();
+  for (const it of items || []) {
+    // repository_url looks like https://api.github.com/repos/OWNER/REPO
+    const m = String(it.repository_url || "").match(/\/repos\/([^/]+)\/([^/]+)$/);
+    if (!m) continue;
+    const [, owner, repo] = m;
+    if (owner.toLowerCase() === own) continue;
+    const key = `${owner}/${repo}`;
+    const when = String(it.closed_at || "").slice(0, 7) || "?";
+    const cur = byRepo.get(key) || { count: 0, latest: "" };
+    cur.count += 1;
+    if (when > cur.latest) cur.latest = when;
+    byRepo.set(key, cur);
+  }
+  return [...byRepo.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 30)
+    .map(([repo, { count, latest }]) => `${repo}: ${count} merged PR${count === 1 ? "" : "s"}, most recent ${latest || "?"}`)
+    .join("\n");
 }
 
 // Pure + deterministic: skip forks, cap at 50, one line per repo.
@@ -501,15 +551,21 @@ async function main() {
     : null;
 
   let githubDigest = null;
+  let prDigest = null;
   if (config.github) {
     try {
       githubDigest = renderGithubDigest(await fetchGithubRepos(config.github));
     } catch (err) {
       console.warn(`GitHub fetch failed, continuing without repo evidence: ${err.message}`);
     }
+    try {
+      prDigest = renderPRDigest(await fetchMergedPRs(config.github), config.github);
+    } catch (err) {
+      console.warn(`GitHub PR search failed, continuing without PR evidence: ${err.message}`);
+    }
   }
 
-  const { system, user } = buildPrompt(config, resume, skills, targets, prevSkills, githubDigest);
+  const { system, user } = buildPrompt(config, resume, skills, targets, prevSkills, githubDigest, prDigest);
 
   console.log(`Analyzing ${targets.length} target(s) with ${model} via runner '${runner}'...`);
 
@@ -580,4 +636,5 @@ module.exports = {
   resolveRunner,
   runCustomRunner,
   renderGithubDigest,
+  renderPRDigest,
 };
